@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+.next/
+*.py[cod]
+*$py.class
+
+# Environment configuration
+config.py
+node_modules/
+*.log

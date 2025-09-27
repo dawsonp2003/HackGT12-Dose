@@ -1,9 +1,0 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-
-# Environment configuration
-config.py
-node_modules/
-*.log
