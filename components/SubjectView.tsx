@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -11,7 +11,7 @@ import SubjectDropdown from './SubjectDropdown'
 import type { Subject } from './SubjectDropdown'
 import AggregateView from './AggregateView'
 import { supabase } from './SupabaseClient'
-import { useEffect } from 'react'
+
 
 // Dummy data
 // Mock subjects data - will be replaced with Supabase API calls
@@ -31,41 +31,44 @@ const stats = {
   adherence: 90
 }
 
-// Calendar heatmap data (last 30 days)
-const calendarData = [
-  { day: 1, status: 'good' }, { day: 2, status: 'good' }, { day: 3, status: 'partial' }, { day: 4, status: 'good' },
-  { day: 5, status: 'good' }, { day: 6, status: 'missed' }, { day: 7, status: 'good' }, { day: 8, status: 'good' },
-  { day: 9, status: 'partial' }, { day: 10, status: 'good' }, { day: 11, status: 'good' }, { day: 12, status: 'good' },
-  { day: 13, status: 'good' }, { day: 14, status: 'partial' }, { day: 15, status: 'good' }, { day: 16, status: 'good' },
-  { day: 17, status: 'good' }, { day: 18, status: 'missed' }, { day: 19, status: 'good' }, { day: 20, status: 'good' },
-  { day: 21, status: 'good' }, { day: 22, status: 'partial' }, { day: 23, status: 'good' }, { day: 24, status: 'good' },
-  { day: 25, status: 'good' }, { day: 26, status: 'good' }, { day: 27, status: 'partial' }, { day: 28, status: 'good' },
-  { day: 29, status: 'good' }, { day: 30, status: 'good' }
-]
+const dateKeyLocal = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+const dateKeyFromMs = (ms: number) => dateKeyLocal(new Date(ms));
 
 // Filter options
-const timelinessOptions = ['All', 'On time', 'Early', 'Late']
+const timelinessOptions = ['All', 'On time', 'Anomaly']
 const doseSizeOptions = ['All', '1', '2']
 const dateRangeOptions = ['All', 'Last 7 days', 'Last 30 days', 'Last 90 days']
 
 // Calendar Heatmap Component
-const CalendarHeatmap = ({ data }: { data: Array<{ day: number; status: string }> }) => {
+const CalendarHeatmap = ({
+    data,
+  }: {
+    data: Array<{ day?: number; status: 'good' | 'partial' | 'missed' | 'empty'; title?: string }>
+  }) => {
     const daysOfWeek = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
-  
+    const chipClass = (s: string) =>
+      s === 'good'
+        ? 'bg-green-500'
+        : s === 'partial'
+        ? 'bg-yellow-500'
+        : s === 'missed'
+        ? 'bg-red-500'
+        : 'bg-transparent'
+
     return (
       <div className="grid grid-cols-7 gap-y-2 text-center">
-        {daysOfWeek.map(day => (
-          <div key={day} className="text-xs text-gray-400">{day}</div>
+        {daysOfWeek.map((day) => (
+          <div key={day} className="text-xs text-gray-400">
+            {day}
+          </div>
         ))}
-        {data.map((item, index) => (
-          <div key={index} className="flex justify-center">
+        {data.map((item, idx) => (
+          <div key={idx} className="flex justify-center">
             <div
-              className={`w-6 h-6 rounded-sm ${
-                item.status === 'good' ? 'bg-green-500' :
-                item.status === 'partial' ? 'bg-yellow-500' :
-                item.status === 'missed' ? 'bg-red-500' : 'bg-gray-600'
-              }`}
-              title={`Day ${item.day}: ${item.status}`}
+              className={`w-6 h-6 rounded-sm ${chipClass(item.status)}`}
+              title={item.title ?? ''}
             />
           </div>
         ))}
@@ -121,6 +124,37 @@ const CircularGauge = ({ percentage }: { percentage: number }) => {
     </div>
   )
 }
+
+// ---- Date helpers (robust across browsers) ----
+const buildTakenAt = (dateVal?: any, timeVal?: any): number | undefined => {
+  // If time is already an ISO/timestamp, prefer it
+  if (typeof timeVal === 'string' && timeVal.includes('T')) return new Date(timeVal).getTime();
+
+  const dStr = String(dateVal ?? '');          // e.g. "2025-08-09"
+  const tStr = String(timeVal ?? '00:00:00');  // e.g. "06:00" | "06:00:00"
+
+  const [y, m, d] = dStr.split('-').map(n => parseInt(n, 10));
+  if (!y || !m || !d) return undefined;
+  const [hh, mm, ss] = tStr.split(':').map(n => parseInt(n, 10));
+
+  // Create a local Date so it formats nicely in the user's TZ
+  const dt = new Date(y, (m - 1), d, hh || 0, mm || 0, ss || 0);
+  return dt.getTime();
+};
+
+const fmtDate = (ms?: number) =>
+  ms ? new Date(ms).toLocaleDateString() : '-';
+
+const fmtTime = (ms?: number) =>
+  ms ? new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-';
+
+const pillFrac = (left?: number, total?: number) => {
+  const hasLeft = left !== undefined && left !== null;
+  const hasTotal = total !== undefined && total !== null;
+  if (hasLeft && hasTotal) return `${left} / ${total}`;
+  return hasLeft ? String(left) : '—';
+};
+
 
 export default function SubjectView() {
   const [timelinessFilter, setTimelinessFilter] = useState('All')
@@ -205,16 +239,9 @@ export default function SubjectView() {
   });
 
   const getKey = (r: any) =>
-    r && r.subjectId != null && r.date && r.time
-      ? `${String(r.subjectId)}|${r.date}|${r.time}`
+    r && r.subjectId != null && r.takenAtMs != null
+      ? `${String(r.subjectId)}|${r.takenAtMs}`
       : undefined;
-
-  const formatDate = (d: string) => new Date(`${d}T00:00:00`).toLocaleDateString();
-  const formatTime = (t: string) => {
-    // t might be "06:00" or "06:00:00" or an ISO string
-    const iso = t.includes('T') ? t : `1970-01-01T${t}`;
-    return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
 
   const fetchEvents = async (subjectId: string | number) => {
     setEventsLoading(true);
@@ -238,27 +265,21 @@ export default function SubjectView() {
 
     // Normalize to fields your table uses
     const normalized = (data ?? []).map((r: any) => {
-      const takenAt =
-        r.takenAt ??
-        (r.date && r.time ? new Date(`${r.date}T${r.time}`).toISOString()
-        : r.date ? new Date(`${r.date}T00:00:00`).toISOString()
-        : r.time ? new Date(`1970-01-01T${r.time}`).toISOString()
-        : undefined);
-
-      // simple badge: anomalyId !== 0 => "Anomaly", else "On time"
-      const timeliness = r.anomalyId && Number(r.anomalyId) !== 0 ? 'Anomaly' : 'On time';
+      const takenAtMs = buildTakenAt(r.date, r.time);
+      const anomalyId = Number(r.anomalyId) || 0;
+      const adherenceScore = r.adherenceScore != null ? Number(r.adherenceScore) : undefined;
 
       return {
         subjectId: r.subjectId,
         date: r.date,
         time: r.time,
-        takenAt,
-        timeliness,
-        doseSize: r.grams ?? r.doseSize ?? 1,  // if you want to show grams as the “dose” chip
+        takenAtMs,
+        timeliness: anomalyId !== 0 ? 'Anomaly' : 'On time',
+        doseSize: r.grams ?? r.doseSize ?? 1,
         pillCount: r.pillCount,
         grams: r.grams,
-        adherenceScore: r.adherenceScore,
-        anomalyId: r.anomalyId,
+        adherenceScore,     // numeric now
+        anomalyId,          // numeric now
       };
     });
 
@@ -276,20 +297,13 @@ export default function SubjectView() {
     fetchEvents(sidNum);
 
     const normalize = (r: any) => {
-      const takenAt =
-        r.takenAt ??
-        (r.date && r.time ? new Date(`${r.date}T${r.time}`).toISOString()
-        : r.date ? new Date(`${r.date}T00:00:00`).toISOString()
-        : r.time ? new Date(`1970-01-01T${r.time}`).toISOString()
-        : undefined);
-
+      const takenAtMs = buildTakenAt(r.date, r.time);
       const timeliness = r.anomalyId && Number(r.anomalyId) !== 0 ? 'Anomaly' : 'On time';
-
       return {
         subjectId: r.subjectId,
         date: r.date,
         time: r.time,
-        takenAt,
+        takenAtMs,
         timeliness,
         doseSize: r.grams ?? r.doseSize ?? 1,
         pillCount: r.pillCount,
@@ -374,6 +388,69 @@ export default function SubjectView() {
     setSelectedSubject(data)
     alert(`New subject "${data.firstName} ${data.lastName}" added successfully!`)
   }
+
+  const calendarData = useMemo(() => {
+    const weeksToShow = 5;
+
+    const dosesPerDay =
+      Number(selectedSubject?.prescription?.dosesPerDay) > 0
+        ? Number(selectedSubject!.prescription!.dosesPerDay)
+        : 2;
+
+    // Track per-day totals + flags
+    const byDate: Record<string, { count: number; hasAnomaly: boolean; missedA3: boolean }> = {};
+
+    for (const e of events) {
+      const key =
+        (typeof e.date === 'string' && e.date.length >= 10) ? e.date.slice(0, 10)
+        : (typeof e.takenAtMs === 'number' ? dateKeyFromMs(e.takenAtMs)
+        : undefined);
+      if (!key) continue;
+
+      if (!byDate[key]) byDate[key] = { count: 0, hasAnomaly: false, missedA3: false };
+      byDate[key].count += 1;
+      const anomaly = Number(e.anomalyId) || 0;
+      const adherZero = Number(e.adherenceScore) === 0;
+
+      byDate[key].hasAnomaly ||= anomaly !== 0;
+      // NEW RULE: anomaly 3 with adherence 0.0 => miss the day
+      byDate[key].missedA3 ||= (anomaly === 3 && adherZero);
+    }
+
+    // Build last 5 weeks, Sun..Sat
+    const today = new Date();
+    const end = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const start = new Date(end);
+    start.setDate(end.getDate() - (weeksToShow * 7 - 1));
+
+    const cells: Array<{ day?: number; status: 'good' | 'partial' | 'missed' | 'empty'; title?: string }> = [];
+
+    const offset = start.getDay();
+    for (let i = 0; i < offset; i++) cells.push({ status: 'empty' });
+
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const key = dateKeyLocal(d);
+      const stats = byDate[key];
+
+      let status: 'good' | 'partial' | 'missed';
+      if (!stats || stats.count === 0) status = 'missed';
+      else if (stats.missedA3) status = 'missed';                          // <-- precedence
+      else if (stats.hasAnomaly || stats.count < dosesPerDay) status = 'partial';
+      else status = 'good';
+
+      cells.push({
+        day: d.getDate(),
+        status,
+        title: `${key}: ${status}${
+          stats ? ` (${stats.count}/${dosesPerDay}${stats.missedA3 ? ', anomaly3+no change' : stats.hasAnomaly ? ', anomaly' : ''})` : ''
+        }`,
+      });
+    }
+
+    return cells;
+  }, [events, selectedSubject]);
+
+
 
   return (
     <div className="min-h-screen bg-gray-900 p-6">
@@ -594,6 +671,7 @@ export default function SubjectView() {
               <CardTitle className="text-white text-lg font-semibold">Event Log</CardTitle>
             </CardHeader>
             <CardContent>
+              <div className="max-h-[360px] overflow-y-auto rounded-md">
               <Table>
                 <TableHeader>
                   <TableRow className="border-gray-600 hover:bg-gray-600">
@@ -651,8 +729,8 @@ export default function SubjectView() {
                   )}
                   {filteredEvents.map((event, index) => (
                     <TableRow key={getKey(event) ?? index} className="border-gray-600 hover:bg-gray-600">
-                      <TableCell className="text-white">{formatDate(event.takenAt)}</TableCell>
-                      <TableCell className="text-white">{formatTime(event.takenAt)}</TableCell>
+                      <TableCell className="text-white">{fmtDate(event.takenAtMs)}</TableCell>
+                      <TableCell className="text-white">{fmtTime(event.takenAtMs)}</TableCell>
                       <TableCell>
                         <span
                           className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
@@ -679,11 +757,17 @@ export default function SubjectView() {
                           {event.doseSize}
                         </span>
                       </TableCell>
-                      <TableCell className="text-white">{String(event.pillCount)}</TableCell>
+                      <TableCell className="text-white">
+                        {pillFrac(
+                          Number(event.pillCount),
+                          Number(selectedSubject?.prescription?.totalPillsPrescribed)
+                        )}
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
+              </div>
             </CardContent>
           </Card>
         </div>
