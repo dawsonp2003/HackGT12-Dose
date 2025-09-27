@@ -5,3 +5,5 @@ __pycache__/
 
 # Environment configuration
 config.py
+node_modules/
+*.log
