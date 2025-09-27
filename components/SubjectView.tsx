@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
-import { Pill, AlertTriangle, CheckCircle, ChevronDown, Filter } from 'lucide-react'
+import { Pill, AlertTriangle, CheckCircle, ChevronDown, Filter, ChevronLeft, ChevronRight } from 'lucide-react'
 import NewSubjectForm from './NewSubjectForm'
 import SubjectDropdown from './SubjectDropdown'
 import type { Subject } from './SubjectDropdown'
@@ -13,17 +13,11 @@ import AggregateView from './AggregateView'
 import { supabase } from './SupabaseClient'
 
 
+
 // Dummy data
 // Mock subjects data - will be replaced with Supabase API calls
 
 // Default subject data (current subject)
-const pillCountData = [
-  { time: '10:00', count: 45 },
-  { time: '12:00', count: 42 },
-  { time: '13:00', count: 38 },
-  { time: '14:00', count: 32 },
-  { time: '15:00', count: 22 }
-]
 
 const stats = {
   pillCount: '24/30',
@@ -45,17 +39,15 @@ const dateRangeOptions = ['All', 'Last 7 days', 'Last 30 days', 'Last 90 days']
 const CalendarHeatmap = ({
     data,
   }: {
-    data: Array<{ day?: number; status: 'good' | 'partial' | 'missed' | 'empty'; title?: string }>
+    data: Array<{ day?: number; status: 'good' | 'partial' | 'missed' | 'nodata' | 'empty'; title?: string }>
   }) => {
     const daysOfWeek = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
     const chipClass = (s: string) =>
-      s === 'good'
-        ? 'bg-green-500'
-        : s === 'partial'
-        ? 'bg-yellow-500'
-        : s === 'missed'
-        ? 'bg-red-500'
-        : 'bg-transparent'
+      s === 'good'   ? 'bg-green-500'
+    : s === 'partial'? 'bg-yellow-500'
+    : s === 'missed' ? 'bg-red-500'
+    : s === 'nodata' ? 'bg-gray-500'
+    : /* empty */      'bg-transparent'
 
     return (
       <div className="grid grid-cols-7 gap-y-2 text-center">
@@ -389,67 +381,152 @@ export default function SubjectView() {
     alert(`New subject "${data.firstName} ${data.lastName}" added successfully!`)
   }
 
-  const calendarData = useMemo(() => {
-    const weeksToShow = 5;
+  const now = new Date()
+  const [calYear, setCalYear] = useState(now.getFullYear())
+  const [calMonth, setCalMonth] = useState(now.getMonth()) // 0-11
 
+  const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  const calendarYears = useMemo(() => {
+    const years = new Set<number>()
+    for (const e of events) {
+      const key = typeof e.date === 'string' ? e.date.slice(0,10)
+        : typeof e.takenAtMs === 'number' ? dateKeyFromMs(e.takenAtMs)
+        : undefined
+      if (!key) continue
+      years.add(Number(key.slice(0,4)))
+    }
+    if (years.size === 0) {
+      const y = now.getFullYear()
+      return [y - 2, y - 1, y, y + 1]
+    }
+    return Array.from(years).sort((a,b) => a - b)
+  }, [events])
+
+  const gotoPrevMonth = () => {
+    setCalMonth(m => {
+      if (m === 0) { setCalYear(y => y - 1); return 11 }
+      return m - 1
+    })
+  }
+  const gotoNextMonth = () => {
+    setCalMonth(m => {
+      if (m === 11) { setCalYear(y => y + 1); return 0 }
+      return m + 1
+    })
+  }
+
+  const calendarData = useMemo(() => {
     const dosesPerDay =
       Number(selectedSubject?.prescription?.dosesPerDay) > 0
         ? Number(selectedSubject!.prescription!.dosesPerDay)
-        : 2;
+        : 2
 
-    // Track per-day totals + flags
-    const byDate: Record<string, { count: number; hasAnomaly: boolean; missedA3: boolean }> = {};
+    // Per-day rollup + anomaly flags
+    const byDate: Record<string, { count: number; hasAnomaly: boolean; missedA3: boolean }> = {}
+
+    // Track min/max event day (midnight) to distinguish "no data" vs "missed"
+    let minMs: number | undefined
+    let maxMs: number | undefined
+
+    const pushMinMax = (ms?: number) => {
+      if (ms == null || Number.isNaN(ms)) return
+      const d = new Date(ms); d.setHours(0,0,0,0)
+      const dayMs = d.getTime()
+      minMs = minMs === undefined ? dayMs : Math.min(minMs, dayMs)
+      maxMs = maxMs === undefined ? dayMs : Math.max(maxMs, dayMs)
+    }
 
     for (const e of events) {
       const key =
-        (typeof e.date === 'string' && e.date.length >= 10) ? e.date.slice(0, 10)
-        : (typeof e.takenAtMs === 'number' ? dateKeyFromMs(e.takenAtMs)
-        : undefined);
-      if (!key) continue;
+        (typeof e.date === 'string' && e.date.length >= 10) ? e.date.slice(0,10)
+        : (typeof e.takenAtMs === 'number') ? dateKeyFromMs(e.takenAtMs)
+        : undefined
+      if (!key) continue
 
-      if (!byDate[key]) byDate[key] = { count: 0, hasAnomaly: false, missedA3: false };
-      byDate[key].count += 1;
-      const anomaly = Number(e.anomalyId) || 0;
-      const adherZero = Number(e.adherenceScore) === 0;
+      if (!byDate[key]) byDate[key] = { count: 0, hasAnomaly: false, missedA3: false }
+      byDate[key].count += 1
+      const anomaly = Number(e.anomalyId) || 0
+      const adherZero = Number(e.adherenceScore) === 0
+      byDate[key].hasAnomaly ||= anomaly !== 0
+      byDate[key].missedA3  ||= (anomaly === 3 && adherZero)
 
-      byDate[key].hasAnomaly ||= anomaly !== 0;
-      // NEW RULE: anomaly 3 with adherence 0.0 => miss the day
-      byDate[key].missedA3 ||= (anomaly === 3 && adherZero);
+      // update min/max from key
+      const [y,m,d] = key.split('-').map(Number)
+      pushMinMax(new Date(y, m - 1, d).getTime())
     }
 
-    // Build last 5 weeks, Sun..Sat
-    const today = new Date();
-    const end = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    const start = new Date(end);
-    start.setDate(end.getDate() - (weeksToShow * 7 - 1));
+    // Build month grid
+    const first = new Date(calYear, calMonth, 1)
+    const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate()
+    const leading = first.getDay()
 
-    const cells: Array<{ day?: number; status: 'good' | 'partial' | 'missed' | 'empty'; title?: string }> = [];
+    const cells: Array<{ day?: number; status: 'good'|'partial'|'missed'|'nodata'|'empty'; title?: string }> = []
 
-    const offset = start.getDay();
-    for (let i = 0; i < offset; i++) cells.push({ status: 'empty' });
+    for (let i = 0; i < leading; i++) cells.push({ status: 'empty' })
 
-    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-      const key = dateKeyLocal(d);
-      const stats = byDate[key];
+    for (let day = 1; day <= daysInMonth; day++) {
+      const d = new Date(calYear, calMonth, day)
+      const key = dateKeyLocal(d)
+      const stats = byDate[key]
 
-      let status: 'good' | 'partial' | 'missed';
-      if (!stats || stats.count === 0) status = 'missed';
-      else if (stats.missedA3) status = 'missed';                          // <-- precedence
-      else if (stats.hasAnomaly || stats.count < dosesPerDay) status = 'partial';
-      else status = 'good';
+      const dm = new Date(calYear, calMonth, day).setHours(0,0,0,0)
+      const outOfRange =
+        minMs === undefined || maxMs === undefined || dm < minMs || dm > maxMs
+
+      let status: 'good'|'partial'|'missed'|'nodata'
+      if (outOfRange) status = 'nodata'
+      else if (!stats || stats.count === 0) status = 'missed'
+      else if (stats.missedA3) status = 'missed'
+      else if (stats.hasAnomaly || stats.count < dosesPerDay) status = 'partial'
+      else status = 'good'
 
       cells.push({
-        day: d.getDate(),
+        day,
         status,
         title: `${key}: ${status}${
           stats ? ` (${stats.count}/${dosesPerDay}${stats.missedA3 ? ', anomaly3+no change' : stats.hasAnomaly ? ', anomaly' : ''})` : ''
         }`,
-      });
+      })
     }
 
-    return cells;
-  }, [events, selectedSubject]);
+    return cells
+  }, [events, selectedSubject, calYear, calMonth])
 
+  const pillCountSeries = useMemo(() => {
+    // keep only rows that have a numeric pillCount
+    const rows = events.filter(
+      (e) => e.pillCount != null && !Number.isNaN(Number(e.pillCount))
+    );
+    if (rows.length === 0) return [];
+
+    // pick the most recent calendar date with data
+    const latestMs = Math.max(
+      ...rows.map((r) => r.takenAtMs ?? buildTakenAt(r.date, r.time) ?? 0)
+    );
+    const latestDayKey = dateKeyFromMs(latestMs);
+
+    // collect that day's readings, sorted by time
+    const dayRows = rows
+      .filter((r) => {
+        const ms = r.takenAtMs ?? buildTakenAt(r.date, r.time);
+        if (!ms) return false;
+        return dateKeyFromMs(ms) === latestDayKey;
+      })
+      .sort(
+        (a, b) =>
+          (a.takenAtMs ?? buildTakenAt(a.date, a.time) ?? 0) -
+          (b.takenAtMs ?? buildTakenAt(b.date, b.time) ?? 0)
+      )
+      .map((r) => {
+        const ms = r.takenAtMs ?? buildTakenAt(r.date, r.time)!;
+        return {
+          time: new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          count: Number(r.pillCount),
+        };
+      });
+
+    return dayRows;
+  }, [events]);
 
 
   return (
@@ -598,9 +675,44 @@ export default function SubjectView() {
 
           {/* Adherence Calendar - Full Width */}
           <Card className="bg-gray-700 border-gray-600">
-            <CardHeader>
+            <CardHeader className="flex items-center justify-between">
               <CardTitle className="text-white text-lg font-semibold">Adherence Calendar</CardTitle>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={gotoPrevMonth}
+                  className="px-2 py-1 rounded-md bg-gray-600 text-white hover:bg-gray-500"
+                  aria-label="Previous month"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+
+                <select
+                  value={calMonth}
+                  onChange={(e) => setCalMonth(Number(e.target.value))}
+                  className="bg-gray-700 text-white text-sm px-2 py-1 rounded border-gray-600"
+                >
+                  {monthNames.map((m, i) => <option key={m} value={i}>{m}</option>)}
+                </select>
+
+                <select
+                  value={calYear}
+                  onChange={(e) => setCalYear(Number(e.target.value))}
+                  className="bg-gray-700 text-white text-sm px-2 py-1 rounded border-gray-600"
+                >
+                  {calendarYears.map(y => <option key={y} value={y}>{y}</option>)}
+                </select>
+
+                <button
+                  onClick={gotoNextMonth}
+                  className="px-2 py-1 rounded-md bg-gray-600 text-white hover:bg-gray-500"
+                  aria-label="Next month"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
             </CardHeader>
+
             <CardContent>
               <CalendarHeatmap data={calendarData} />
               {/* Legend */}
@@ -617,6 +729,10 @@ export default function SubjectView() {
                   <div className="w-3 h-3 bg-red-500 rounded-sm"></div>
                   <span className="text-gray-300">Missed</span>
                 </div>
+                <div className="flex items-center space-x-1">
+                  <div className="w-3 h-3 bg-gray-500 rounded-sm"></div>
+                  <span className="text-gray-300">No data</span>
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -632,38 +748,40 @@ export default function SubjectView() {
             </CardHeader>
             <CardContent>
               <ResponsiveContainer width="100%" height={200}>
-                <LineChart data={pillCountData}>
+                <LineChart data={pillCountSeries}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                  <XAxis 
-                    dataKey="time" 
+                  <XAxis dataKey="time" stroke="#9CA3AF" fontSize={12} />
+                  <YAxis
                     stroke="#9CA3AF"
                     fontSize={12}
+                    domain={['dataMin - 2', 'dataMax + 2']}
+                    allowDecimals={false}
                   />
-                  <YAxis 
-                    stroke="#9CA3AF"
-                    fontSize={12}
-                    domain={[20, 50]}
-                    ticks={[20, 30, 40, 50]}
-                  />
-                  <Tooltip 
-                    contentStyle={{ 
-                      backgroundColor: '#374151', 
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: '#374151',
                       border: '1px solid #4B5563',
                       borderRadius: '6px',
-                      color: '#F9FAFB'
+                      color: '#F9FAFB',
                     }}
                   />
-                  <Line 
-                    type="monotone" 
-                    dataKey="count" 
-                    stroke="#3B82F6" 
+                  <Line
+                    type="monotone"
+                    dataKey="count"
+                    stroke="#3B82F6"
                     strokeWidth={2}
                     dot={{ fill: '#3B82F6', strokeWidth: 2, r: 4 }}
+                    isAnimationActive={false}
                   />
                 </LineChart>
               </ResponsiveContainer>
+
+              {pillCountSeries.length === 0 && (
+                <div className="text-gray-400 text-sm mt-2">No pill count readings yet.</div>
+              )}
             </CardContent>
           </Card>
+
 
           {/* Event Log Table */}
           <Card className="bg-gray-700 border-gray-600">
@@ -671,10 +789,12 @@ export default function SubjectView() {
               <CardTitle className="text-white text-lg font-semibold">Event Log</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="max-h-[360px] overflow-y-auto rounded-md">
-              <Table>
-                <TableHeader>
-                  <TableRow className="border-gray-600 hover:bg-gray-600">
+              {/* fixed height + scroll, so it doesn't extend past the calendar */}
+              <div className="h-[300px] md:h-[305px] overflow-y-auto rounded-md">
+                <Table>
+                  {/* keep header visible while scrolling */}
+                  <TableHeader className="sticky top-0 bg-gray-700 z-10">
+                    <TableRow className="border-gray-600 hover:bg-gray-600">
                     <TableHead className="text-gray-300">
                       <div className="flex items-center space-x-2">
                         <span>Date</span>
