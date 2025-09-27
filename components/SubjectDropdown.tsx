@@ -4,7 +4,7 @@ import React, { useState, useRef, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { ChevronDown, User } from 'lucide-react'
 
-interface Subject {
+export interface Subject {
   subjectId: string
   firstName: string
   lastName: string
@@ -22,6 +22,8 @@ interface Subject {
     start: string
     end: string
   }>
+  currAdherenceScore: number
+  pillWeight: number
 }
 
 interface SubjectDropdownProps {

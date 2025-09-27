@@ -8,127 +8,21 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { Pill, AlertTriangle, CheckCircle, ChevronDown, Filter } from 'lucide-react'
 import NewSubjectForm from './NewSubjectForm'
 import SubjectDropdown from './SubjectDropdown'
+import type { Subject } from './SubjectDropdown'
 import AggregateView from './AggregateView'
+import { supabase } from './SupabaseClient'
+import { useEffect } from 'react'
 
 // Dummy data
 // Mock subjects data - will be replaced with Supabase API calls
-const mockSubjects = [
-  {
-    subjectId: '12345',
-    firstName: 'John',
-    lastName: 'Doe',
-    age: 30,
-    sex: 'male',
-    race: 'White',
-    weight: '70 kg',
-    height: '180 cm',
-    prescription: {
-      dosesPerDay: 2,
-      pillsPerDose: 2,
-      totalPillsPrescribed: 120
-    },
-    dosingWindows: [
-      { start: '08:00', end: '08:30' },
-      { start: '20:00', end: '20:30' }
-    ]
-  },
-  {
-    subjectId: '67890',
-    firstName: 'Sarah',
-    lastName: 'Smith',
-    age: 45,
-    sex: 'female',
-    race: 'Asian',
-    weight: '65 kg',
-    height: '165 cm',
-    prescription: {
-      dosesPerDay: 3,
-      pillsPerDose: 1,
-      totalPillsPrescribed: 90
-    },
-    dosingWindows: [
-      { start: '07:00', end: '07:30' },
-      { start: '13:00', end: '13:30' },
-      { start: '19:00', end: '19:30' }
-    ]
-  },
-  {
-    subjectId: '11111',
-    firstName: 'Michael',
-    lastName: 'Johnson',
-    age: 28,
-    sex: 'male',
-    race: 'Black or African American',
-    weight: '80 kg',
-    height: '185 cm',
-    prescription: {
-      dosesPerDay: 1,
-      pillsPerDose: 3,
-      totalPillsPrescribed: 90
-    },
-    dosingWindows: [
-      { start: '09:00', end: '09:30' }
-    ]
-  },
-  {
-    subjectId: '22222',
-    firstName: 'Emily',
-    lastName: 'Davis',
-    age: 52,
-    sex: 'female',
-    race: 'White',
-    weight: '60 kg',
-    height: '160 cm',
-    prescription: {
-      dosesPerDay: 4,
-      pillsPerDose: 2,
-      totalPillsPrescribed: 240
-    },
-    dosingWindows: [
-      { start: '06:00', end: '06:30' },
-      { start: '12:00', end: '12:30' },
-      { start: '18:00', end: '18:30' },
-      { start: '22:00', end: '22:30' }
-    ]
-  }
-]
 
 // Default subject data (current subject)
-const subjectData = mockSubjects[0]
-
 const pillCountData = [
   { time: '10:00', count: 45 },
   { time: '12:00', count: 42 },
   { time: '13:00', count: 38 },
   { time: '14:00', count: 32 },
   { time: '15:00', count: 22 }
-]
-
-const eventLogData = [
-  {
-    date: '9/26/2025',
-    time: '14:06',
-    timeliness: 'On time',
-    doseSize: 2,
-    pillCount: '24 / 30',
-    isAnomaly: false
-  },
-  {
-    date: '9/25/2025',
-    time: '8:23',
-    timeliness: 'Early',
-    doseSize: 2,
-    pillCount: '26 / 30',
-    isAnomaly: true
-  },
-  {
-    date: '9/24/2025',
-    time: '13:59',
-    timeliness: 'On time',
-    doseSize: 1,
-    pillCount: '28 / 30',
-    isAnomaly: true
-  }
 ]
 
 const stats = {
@@ -193,7 +87,7 @@ const CircularGauge = ({ percentage }: { percentage: number }) => {
   }
 
   return (
-    <div className="relative w-36 h-36">
+    <div className="relative w-36 h-36 right-10 top-10">
       <svg className="w-36 h-36 transform -rotate-90" viewBox="0 0 120 120">
         {/* Background circle */}
         <circle
@@ -233,29 +127,252 @@ export default function SubjectView() {
   const [doseSizeFilter, setDoseSizeFilter] = useState('All')
   const [dateRangeFilter, setDateRangeFilter] = useState('All')
   const [isNewSubjectFormOpen, setIsNewSubjectFormOpen] = useState(false)
-  const [selectedSubject, setSelectedSubject] = useState(mockSubjects[0])
-  const [subjects, setSubjects] = useState(mockSubjects)
+
+  const [selectedSubject, setSelectedSubject] = useState<Subject>({} as Subject)
+  const [subjects, setSubjects] = useState<Subject[]>([])
+
+  const [events, setEvents] = useState<any[]>([]);
+  const [eventsLoading, setEventsLoading] = useState(false);
+
   const [currentView, setCurrentView] = useState<'subject' | 'aggregate'>('subject')
 
-  const filteredEvents = eventLogData.filter(event => {
-    if (timelinessFilter !== 'All' && event.timeliness !== timelinessFilter) return false
-    if (doseSizeFilter !== 'All' && event.doseSize.toString() !== doseSizeFilter) return false
-    return true
-  })
+  useEffect(() => {
+    const fetchSubjects = async () => {
+      const { data, error } = await supabase
+        .from("subjects")
+        .select("*");
+
+      if (error) {
+        console.error("Error fetching subjects:", error);
+        return;
+      }
+
+      if (data && data.length > 0) {
+        const parsed = data.map(row => {
+          let prescription = row.prescription;
+          let dosingWindows = row.dosingWindows;
+
+          // Handle prescription
+          if (typeof prescription === "string") {
+            try {
+              prescription = JSON.parse(prescription);
+            } catch {
+              prescription = null;
+            }
+          }
+
+          if (!prescription) {
+            prescription = {
+              dosesPerDay: 0,
+              pillsPerDose: 0,
+              totalPillsPrescribed: 0,
+            };
+          }
+
+          // Handle dosingWindows
+          if (typeof dosingWindows === "string") {
+            try {
+              dosingWindows = JSON.parse(dosingWindows);
+            } catch {
+              dosingWindows = [];
+            }
+          }
+          if (!Array.isArray(dosingWindows)) {
+            dosingWindows = [];
+          }
+
+          return {
+            ...row,
+            prescription,
+            dosingWindows,
+          };
+        });
+
+        console.log("Parsed data:", parsed);
+        setSubjects(parsed);
+        setSelectedSubject(parsed[0]); // auto-pick first
+      }
+    };
+
+    fetchSubjects();
+  }, []);
+
+
+  const filteredEvents = events.filter(event => {
+    if (timelinessFilter !== 'All' && event.timeliness !== timelinessFilter) return false;
+    if (doseSizeFilter !== 'All' && String(event.doseSize) !== doseSizeFilter) return false;
+    return true;
+  });
+
+  const getKey = (r: any) =>
+    r && r.subjectId != null && r.date && r.time
+      ? `${String(r.subjectId)}|${r.date}|${r.time}`
+      : undefined;
+
+  const formatDate = (d: string) => new Date(`${d}T00:00:00`).toLocaleDateString();
+  const formatTime = (t: string) => {
+    // t might be "06:00" or "06:00:00" or an ISO string
+    const iso = t.includes('T') ? t : `1970-01-01T${t}`;
+    return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const fetchEvents = async (subjectId: string | number) => {
+    setEventsLoading(true);
+
+    const sidNum = Number(subjectId);
+    const { data, error } = await supabase
+      .from('events')
+      .select('*')
+      .eq('subjectId', sidNum)           // bigint match
+      .order('date', { ascending: false })
+      .order('time', { ascending: false })
+      .limit(200);
+
+    console.log('[events] fetch', { error, count: data?.length, sample: data?.[0] });
+
+    if (error) {
+      setEvents([]);
+      setEventsLoading(false);
+      return;
+    }
+
+    // Normalize to fields your table uses
+    const normalized = (data ?? []).map((r: any) => {
+      const takenAt =
+        r.takenAt ??
+        (r.date && r.time ? new Date(`${r.date}T${r.time}`).toISOString()
+        : r.date ? new Date(`${r.date}T00:00:00`).toISOString()
+        : r.time ? new Date(`1970-01-01T${r.time}`).toISOString()
+        : undefined);
+
+      // simple badge: anomalyId !== 0 => "Anomaly", else "On time"
+      const timeliness = r.anomalyId && Number(r.anomalyId) !== 0 ? 'Anomaly' : 'On time';
+
+      return {
+        subjectId: r.subjectId,
+        date: r.date,
+        time: r.time,
+        takenAt,
+        timeliness,
+        doseSize: r.grams ?? r.doseSize ?? 1,  // if you want to show grams as the “dose” chip
+        pillCount: r.pillCount,
+        grams: r.grams,
+        adherenceScore: r.adherenceScore,
+        anomalyId: r.anomalyId,
+      };
+    });
+
+    setEvents(normalized);
+    setEventsLoading(false);
+  };
+
+
+  useEffect(() => {
+    const sid = selectedSubject?.subjectId;
+    if (sid == null) return;
+
+    const sidNum = Number(sid);
+    console.log('[events] selectedSubject:', selectedSubject);
+    fetchEvents(sidNum);
+
+    const normalize = (r: any) => {
+      const takenAt =
+        r.takenAt ??
+        (r.date && r.time ? new Date(`${r.date}T${r.time}`).toISOString()
+        : r.date ? new Date(`${r.date}T00:00:00`).toISOString()
+        : r.time ? new Date(`1970-01-01T${r.time}`).toISOString()
+        : undefined);
+
+      const timeliness = r.anomalyId && Number(r.anomalyId) !== 0 ? 'Anomaly' : 'On time';
+
+      return {
+        subjectId: r.subjectId,
+        date: r.date,
+        time: r.time,
+        takenAt,
+        timeliness,
+        doseSize: r.grams ?? r.doseSize ?? 1,
+        pillCount: r.pillCount,
+        grams: r.grams,
+        adherenceScore: r.adherenceScore,
+        anomalyId: r.anomalyId,
+      };
+    };
+
+    const channel = supabase
+      .channel(`events:subject:${sidNum}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'events', filter: `subjectId=eq.${sidNum}` },
+        ({ new: row }) => {
+          const normalized = normalize(row);
+          setEvents(prev => {
+            const k = getKey(normalized);
+            if (!k) return prev;
+            const i = prev.findIndex(e => getKey(e) === k);
+            return i >= 0 ? prev.map((e, idx) => (idx === i ? normalized : e)) : [normalized, ...prev];
+          });
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'events', filter: `subjectId=eq.${sidNum}` },
+        ({ new: row }) => {
+          const normalized = normalize(row);
+          setEvents(prev => {
+            const k = getKey(normalized);
+            if (!k) return prev;
+            return prev.map(e => (getKey(e) === k ? normalized : e));
+          });
+        }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [selectedSubject?.subjectId]);
+
+
+
 
   const handleSubjectSelect = (subject: any) => {
-    setSelectedSubject(subject)
-    // Here you would typically fetch the subject's events data from Supabase
-    console.log('Selected subject:', subject)
-  }
+    setSelectedSubject(subject);
+    fetchEvents(Number(subject.subjectId));
+  };
 
-  const handleNewSubjectSubmit = (newSubjectData: any) => {
+  const handleNewSubjectSubmit = async (newSubjectData: any) => {
     console.log('New subject data:', newSubjectData)
-    // Add the new subject to the subjects list
-    setSubjects(prev => [...prev, newSubjectData])
-    // Select the newly created subject
-    setSelectedSubject(newSubjectData)
-    alert(`New subject "${newSubjectData.firstName} ${newSubjectData.lastName}" added successfully!`)
+
+    // Map to your table’s columns and types
+    const payload = {
+      firstName: newSubjectData.firstName,
+      lastName: newSubjectData.lastName,
+      age: newSubjectData.age,
+      sex: newSubjectData.sex,
+      race: newSubjectData.race,
+      weight: newSubjectData.weight,       // number or string, match DB
+      height: newSubjectData.height,       // number or string, match DB
+      prescription: newSubjectData.prescription,        // or JSON.stringify(...)
+      dosingWindows: newSubjectData.dosingWindows,      // or JSON.stringify(...)
+      currAdherenceScore: newSubjectData.currAdherenceScore ?? 1.0,
+      pillWeight: newSubjectData.pillWeight ?? 0.0
+    }
+
+    const { data, error } = await supabase
+      .from('subjects')
+      .insert(payload)
+      .select()
+      .single()
+
+    if (error) {
+      console.error('Error inserting subject:', error)
+      alert(error.message || 'Failed to add subject.')
+      return
+    }
+
+    // `data` is the inserted row
+    setSubjects(prev => [...prev, data])
+    setSelectedSubject(data)
+    alert(`New subject "${data.firstName} ${data.lastName}" added successfully!`)
   }
 
   return (
@@ -330,10 +447,6 @@ export default function SubjectView() {
               {/* Patient Details */}
               <div className="space-y-3 w-1/3">
                 <div className="flex justify-between">
-                  <span className="text-gray-300">Subject ID:</span>
-                  <span className="text-white font-medium">{selectedSubject.subjectId}</span>
-                </div>
-                <div className="flex justify-between">
                   <span className="text-gray-300">First Name:</span>
                   <span className="text-white font-medium">{selectedSubject.firstName}</span>
                 </div>
@@ -367,8 +480,17 @@ export default function SubjectView() {
               <div className="space-y-3">
                 <h3 className="text-white font-semibold text-lg">Prescription</h3>
                 <div className="text-gray-300 space-y-1">
-                  <div>{selectedSubject.prescription.dosesPerDay} doses/day, {selectedSubject.prescription.pillsPerDose} pills/dose</div>
-                  <div>Total prescribed: {selectedSubject.prescription.totalPillsPrescribed} pills</div>
+                  {selectedSubject?.prescription && (
+                    <>
+                      <div>
+                        {selectedSubject.prescription.dosesPerDay} doses/day,{" "}
+                        {selectedSubject.prescription.pillsPerDose} pills/dose
+                      </div>
+                      <div>
+                        Total prescribed: {selectedSubject.prescription.totalPillsPrescribed} pills
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -376,12 +498,11 @@ export default function SubjectView() {
               <div className="space-y-3">
                 <h3 className="text-white font-semibold text-lg">Dosing Windows</h3>
                 <div className="space-y-2">
-                  {selectedSubject.dosingWindows.map((window, index) => (
+                  {selectedSubject?.dosingWindows?.map((window, index) => (
                     <div key={index} className="flex justify-between items-center">
                       <span className="text-gray-300">
                         {window.start} - {window.end}
                       </span>
-                      
                     </div>
                   ))}
                 </div>
@@ -390,7 +511,7 @@ export default function SubjectView() {
                 
                 {/* Circular Adherence Gauge - No Card Wrapper */}
               <div className="flex items-left  ">
-                <CircularGauge percentage={stats.adherence} />
+                <CircularGauge percentage={selectedSubject.currAdherenceScore * 100} />
               </div>
                 
               
@@ -523,35 +644,42 @@ export default function SubjectView() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
+                  {eventsLoading && (
+                    <TableRow className="border-gray-600">
+                      <TableCell colSpan={5} className="text-gray-300">Loading events…</TableCell>
+                    </TableRow>
+                  )}
                   {filteredEvents.map((event, index) => (
-                    <TableRow key={index} className="border-gray-600 hover:bg-gray-600">
-                      <TableCell className="text-white">{event.date}</TableCell>
-                      <TableCell className="text-white">{event.time}</TableCell>
+                    <TableRow key={getKey(event) ?? index} className="border-gray-600 hover:bg-gray-600">
+                      <TableCell className="text-white">{formatDate(event.takenAt)}</TableCell>
+                      <TableCell className="text-white">{formatTime(event.takenAt)}</TableCell>
                       <TableCell>
-                        <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                          event.timeliness === 'On time' 
-                            ? 'bg-gray-600 text-gray-300' 
-                            : 'bg-red-500 text-white'
-                        }`}>
-                          {event.timeliness === 'On time' ? (
-                            <CheckCircle className="w-3 h-3 mr-1" />
-                          ) : (
-                            <AlertTriangle className="w-3 h-3 mr-1" />
-                          )}
+                        <span
+                          className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                            event.timeliness === 'On time'
+                              ? 'bg-gray-600 text-gray-300'
+                              : 'bg-red-500 text-white'
+                          }`}
+                        >
+                          {event.timeliness === 'On time'
+                            ? <CheckCircle className="w-3 h-3 mr-1" />
+                            : <AlertTriangle className="w-3 h-3 mr-1" />}
                           {event.timeliness}
                         </span>
                       </TableCell>
                       <TableCell>
-                        <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                          event.doseSize === 2 
-                            ? 'bg-gray-600 text-gray-300' 
-                            : 'bg-red-500 text-white'
-                        }`}>
+                        <span
+                          className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                            Number(event.doseSize) === 2
+                              ? 'bg-gray-600 text-gray-300'
+                              : 'bg-red-500 text-white'
+                          }`}
+                        >
                           <Pill className="w-3 h-3 mr-1" />
                           {event.doseSize}
                         </span>
                       </TableCell>
-                      <TableCell className="text-white">{event.pillCount}</TableCell>
+                      <TableCell className="text-white">{String(event.pillCount)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

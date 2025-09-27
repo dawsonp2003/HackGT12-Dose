@@ -11,7 +11,6 @@ interface DosingWindow {
 }
 
 interface SubjectData {
-  subjectId: string
   firstName: string
   lastName: string
   age: number
@@ -30,12 +29,11 @@ interface SubjectData {
 interface NewSubjectFormProps {
   isOpen: boolean
   onClose: () => void
-  onSubmit: (subjectData: SubjectData) => void
+  onSubmit: (subjectData: SubjectData) => Promise<void>
 }
 
 export default function NewSubjectForm({ isOpen, onClose, onSubmit }: NewSubjectFormProps) {
   const [formData, setFormData] = useState<SubjectData>({
-    subjectId: '',
     firstName: '',
     lastName: '',
     age: 0,
@@ -52,6 +50,7 @@ export default function NewSubjectForm({ isOpen, onClose, onSubmit }: NewSubject
   })
 
   const [errors, setErrors] = useState<Record<string, string>>({})
+  const [submitting, setSubmitting] = useState(false)
 
   // Update dosing windows when dosesPerDay changes
   useEffect(() => {
@@ -112,10 +111,10 @@ export default function NewSubjectForm({ isOpen, onClose, onSubmit }: NewSubject
     }))
   }
 
+  
+
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {}
-
-    if (!formData.subjectId.trim()) newErrors.subjectId = 'Subject ID is required'
     if (!formData.firstName.trim()) newErrors.firstName = 'First name is required'
     if (!formData.lastName.trim()) newErrors.lastName = 'Last name is required'
     if (formData.age <= 0) newErrors.age = 'Age must be greater than 0'
@@ -140,34 +139,38 @@ export default function NewSubjectForm({ isOpen, onClose, onSubmit }: NewSubject
     return Object.keys(newErrors).length === 0
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (validateForm()) {
-      onSubmit(formData)
+    if (!validateForm()) return
+
+    try {
+      setSubmitting(true)    // ⬅️ disable button
+      await onSubmit(formData)
       onClose()
+    } finally {
+      setSubmitting(false)   // ⬅️ re-enable no matter what
     }
   }
 
   const handleClose = () => {
-    setFormData({
-      subjectId: '',
-      firstName: '',
-      lastName: '',
-      age: 0,
-      sex: '',
-      race: '',
-      weight: '',
-      height: '',
-      prescription: {
-        dosesPerDay: 1,
-        pillsPerDose: 1,
-        totalPillsPrescribed: 30
-      },
-      dosingWindows: [{ start: '08:00', end: '08:30' }]
-    })
-    setErrors({})
-    onClose()
-  }
+  setFormData({
+    firstName: '',
+    lastName: '',
+    age: 0,
+    sex: '',
+    race: '',
+    weight: '',
+    height: '',
+    prescription: {
+      dosesPerDay: 1,
+      pillsPerDose: 1,
+      totalPillsPrescribed: 30,
+    },
+    dosingWindows: [{ start: '08:00', end: '08:30' }],
+  })
+  setErrors({})
+  onClose()
+}
 
   if (!isOpen) return null
 
@@ -186,17 +189,6 @@ export default function NewSubjectForm({ isOpen, onClose, onSubmit }: NewSubject
             <div className="space-y-4">
               <h3 className="text-lg font-medium">Basic Information</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium mb-1">Subject ID *</label>
-                  <input
-                    type="text"
-                    value={formData.subjectId}
-                    onChange={(e) => handleInputChange('subjectId', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Enter subject ID"
-                  />
-                  {errors.subjectId && <p className="text-red-500 text-xs mt-1">{errors.subjectId}</p>}
-                </div>
                 <div>
                   <label className="block text-sm font-medium mb-1">First Name *</label>
                   <input
@@ -413,12 +405,12 @@ export default function NewSubjectForm({ isOpen, onClose, onSubmit }: NewSubject
             </div>
 
             {/* Form Actions */}
-            <div className="flex justify-end space-x-3 pt-4 border-t">
-              <Button type="button" variant="outline" onClick={handleClose}>
+             <div className="flex justify-end space-x-3 pt-4 border-t">
+              <Button type="button" variant="outline" onClick={handleClose} disabled={submitting}>
                 Cancel
               </Button>
-              <Button type="submit">
-                Add Subject
+              <Button type="submit" disabled={submitting}>
+                {submitting ? "Adding..." : "Add Subject"}
               </Button>
             </div>
           </form>
