@@ -24,7 +24,8 @@ const mockSubjects = [
     height: '180 cm',
     prescription: {
       dosesPerDay: 2,
-      pillsPerDose: 2
+      pillsPerDose: 2,
+      totalPillsPrescribed: 120
     },
     dosingWindows: [
       { start: '08:00', end: '08:30' },
@@ -42,7 +43,8 @@ const mockSubjects = [
     height: '165 cm',
     prescription: {
       dosesPerDay: 3,
-      pillsPerDose: 1
+      pillsPerDose: 1,
+      totalPillsPrescribed: 90
     },
     dosingWindows: [
       { start: '07:00', end: '07:30' },
@@ -61,7 +63,8 @@ const mockSubjects = [
     height: '185 cm',
     prescription: {
       dosesPerDay: 1,
-      pillsPerDose: 3
+      pillsPerDose: 3,
+      totalPillsPrescribed: 90
     },
     dosingWindows: [
       { start: '09:00', end: '09:30' }
@@ -78,7 +81,8 @@ const mockSubjects = [
     height: '160 cm',
     prescription: {
       dosesPerDay: 4,
-      pillsPerDose: 2
+      pillsPerDose: 2,
+      totalPillsPrescribed: 240
     },
     dosingWindows: [
       { start: '06:00', end: '06:30' },
@@ -258,6 +262,7 @@ export default function SubjectView() {
     <div className="min-h-screen bg-gray-900 p-6">
       {/* Header */}
       <div className="mb-8">
+        
         {/* Tabs */}
         <div className="flex justify-between items-center mb-6">
             <div className="flex bg-gray-800 rounded-lg p-1">
@@ -361,8 +366,9 @@ export default function SubjectView() {
               {/* Prescription */}
               <div className="space-y-3">
                 <h3 className="text-white font-semibold text-lg">Prescription</h3>
-                <div className="text-gray-300">
-                  {selectedSubject.prescription.dosesPerDay} doses/day, {selectedSubject.prescription.pillsPerDose} pills/dose
+                <div className="text-gray-300 space-y-1">
+                  <div>{selectedSubject.prescription.dosesPerDay} doses/day, {selectedSubject.prescription.pillsPerDose} pills/dose</div>
+                  <div>Total prescribed: {selectedSubject.prescription.totalPillsPrescribed} pills</div>
                 </div>
               </div>
 

@@ -91,7 +91,6 @@ export default function AggregateView() {
     <div className="min-h-screen bg-gray-900 p-6">
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-4xl font-bold text-white mb-6">Dose - Aggregate View</h1>
         
         {/* Summary Statistics */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">

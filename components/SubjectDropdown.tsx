@@ -16,6 +16,7 @@ interface Subject {
   prescription: {
     dosesPerDay: number
     pillsPerDose: number
+    totalPillsPrescribed: number
   }
   dosingWindows: Array<{
     start: string

@@ -22,6 +22,7 @@ interface SubjectData {
   prescription: {
     dosesPerDay: number
     pillsPerDose: number
+    totalPillsPrescribed: number
   }
   dosingWindows: DosingWindow[]
 }
@@ -44,7 +45,8 @@ export default function NewSubjectForm({ isOpen, onClose, onSubmit }: NewSubject
     height: '',
     prescription: {
       dosesPerDay: 1,
-      pillsPerDose: 1
+      pillsPerDose: 1,
+      totalPillsPrescribed: 30
     },
     dosingWindows: [{ start: '08:00', end: '08:30' }]
   })
@@ -123,6 +125,7 @@ export default function NewSubjectForm({ isOpen, onClose, onSubmit }: NewSubject
     if (!formData.height.trim()) newErrors.height = 'Height is required'
     if (formData.prescription.dosesPerDay <= 0) newErrors['prescription.dosesPerDay'] = 'Doses per day must be greater than 0'
     if (formData.prescription.pillsPerDose <= 0) newErrors['prescription.pillsPerDose'] = 'Pills per dose must be greater than 0'
+    if (formData.prescription.totalPillsPrescribed <= 0) newErrors['prescription.totalPillsPrescribed'] = 'Total pills prescribed must be greater than 0'
 
     // Validate dosing windows
     formData.dosingWindows.forEach((window, index) => {
@@ -157,7 +160,8 @@ export default function NewSubjectForm({ isOpen, onClose, onSubmit }: NewSubject
       height: '',
       prescription: {
         dosesPerDay: 1,
-        pillsPerDose: 1
+        pillsPerDose: 1,
+        totalPillsPrescribed: 30
       },
       dosingWindows: [{ start: '08:00', end: '08:30' }]
     })
@@ -343,6 +347,35 @@ export default function NewSubjectForm({ isOpen, onClose, onSubmit }: NewSubject
                     </Button>
                   </div>
                   {errors['prescription.pillsPerDose'] && <p className="text-red-500 text-xs mt-1">{errors['prescription.pillsPerDose']}</p>}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Total Pills Prescribed *</label>
+                  <div className="flex items-center space-x-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleInputChange('prescription.totalPillsPrescribed', Math.max(1, formData.prescription.totalPillsPrescribed - 10))}
+                    >
+                      <Minus className="h-4 w-4" />
+                    </Button>
+                    <input
+                      type="number"
+                      value={formData.prescription.totalPillsPrescribed}
+                      onChange={(e) => handleInputChange('prescription.totalPillsPrescribed', parseInt(e.target.value) || 1)}
+                      className="w-24 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-center"
+                      min="1"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleInputChange('prescription.totalPillsPrescribed', formData.prescription.totalPillsPrescribed + 10)}
+                    >
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  {errors['prescription.totalPillsPrescribed'] && <p className="text-red-500 text-xs mt-1">{errors['prescription.totalPillsPrescribed']}</p>}
                 </div>
               </div>
             </div>
