@@ -1,6 +1,7 @@
 # Dose - Medication Adherence Tracking App
+Dose is a smart medication adherence system that combines a sensor-equipped pill bottle with an interactive web dashboard. The pill bottle uses a load cell sensor to detect pills entering or leaving in real time, creating an accurate, tamper-resistant record of medication usage. This data is visualized through a responsive dashboard that provides patient profiles, adherence statistics, dosing windows, anomaly detection, and pill count trends. By bridging reliable hardware sensing with an intuitive software interface, Dose empowers researchers, clinicians, and caregivers to monitor adherence more effectively, reduce trial errors, and ultimately improve patient health outcomes.
 
-A modern, responsive React component built with Next.js 14, TypeScript, TailwindCSS, and shadcn/ui components for tracking medication adherence and dosing patterns.
+This repository outlines the software end, a modern, responsive React component built with Next.js 14, TypeScript, TailwindCSS, and shadcn/ui components for tracking medication adherence and dosing patterns.
 
 ## Features
 
