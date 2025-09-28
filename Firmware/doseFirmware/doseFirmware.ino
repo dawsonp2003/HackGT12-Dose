@@ -46,8 +46,8 @@ void setup() {
 
   // Start load cell
   scale.begin(dataPin, clockPin);
-  scale.set_offset(218602);
-  scale.set_scale(17465.935547); // Calibrated scale factor
+  scale.set_offset(-5803966);
+  scale.set_scale(1278.615356); // Calibrated scale factor
 
   last_sample_time = millis();
   nextPing = last_sample_time + 5000;
