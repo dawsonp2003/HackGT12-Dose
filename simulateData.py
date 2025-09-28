@@ -1,4 +1,3 @@
-import socket
 from datetime import datetime, timedelta
 from supabase import create_client, Client
 from config import SUPABASE_URL, SUPABASE_KEY
@@ -9,6 +8,7 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # Global state
 previous_weight = 0.0
 previous_subject_id = -1
+gramsPerPill = -1
 
 # Server setup
 HOST = "0.0.0.0"
@@ -47,6 +47,7 @@ def insert_to_supabase(grams):
     pill_count = int(prescription.get("pillCount", 0))
 
     grams_per_pill = pill_weight if pill_weight else grams / max(1, pill_count)
+    gramsPerPill = grams_per_pill  # Update global reference value
 
     # --- Anomaly detection ---
     anomaly_id = "0"  # default = no anomaly
@@ -107,42 +108,92 @@ def insert_to_supabase(grams):
     previous_weight = grams
 
 
-# TCP server loop
-with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-    s.bind((HOST, PORT))
-    s.listen()
-    print(f"Listening on {HOST}:{PORT}...")
 
-    while True:
-        conn, addr = s.accept()
-        conn.settimeout(60)
-        print(f"Connected by {addr}")
-        with conn:
-            buffer = ""
-            while True:
-                try:
-                    data = conn.recv(1024)
-                except socket.timeout:
-                    print("Socket timeout, closing connection.")
-                    break
-                if not data:
-                    print(f"Connection closed by {addr}")
-                    break
 
-                buffer += data.decode()
 
-                while "\n" in buffer:
-                    line, buffer = buffer.split("\n", 1)
-                    line = line.strip()
-                    if not line:
-                        continue
+from flask import Flask, request, render_template_string, redirect, url_for
 
-                    now = datetime.now().strftime("%H:%M:%S")
-                    print(f"{now}: {line}")
+app = Flask(__name__)
 
-                    # try:
-                    #     grams = float(line)
-                    #     print(f"Grams: {grams}")
-                    #     insert_to_supabase(grams)
-                    # except ValueError:
-                    #     continue
+HTML = """
+<!DOCTYPE html>
+<html>
+  <head>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        background-color: #f9f9f9;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        margin: 0;
+      }
+      .container {
+        background: white;
+        padding: 30px;
+        border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        text-align: center;
+      }
+      input[type="number"] {
+        width: 200px;
+        padding: 12px;
+        font-size: 18px;
+        border: 1px solid #ccc;
+        border-radius: 8px;
+        margin-bottom: 15px;
+        text-align: center;
+      }
+      button {
+        padding: 12px 20px;
+        font-size: 18px;
+        background-color: #007BFF;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+      }
+      button:hover {
+        background-color: #0056b3;
+      }
+      .reference {
+        margin-top: 15px;
+        font-size: 16px;
+        color: #444;
+        font-style: italic;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h2>Enter Grams</h2>
+      <form action="/submit" method="POST">
+        <input type="number" step="0.01" name="grams" placeholder="Enter grams" required>
+        <br>
+        <button type="submit">Send</button>
+      </form>
+      {% if gramsPerPill != -1 %}
+        <div class="reference">
+          For Reference: {{ gramsPerPill }}g per pill
+        </div>
+      {% endif %}
+    </div>
+  </body>
+</html>
+"""
+
+@app.route("/", methods=["GET"])
+def index():
+    return render_template_string(HTML, gramsPerPill=gramsPerPill)
+
+@app.route("/submit", methods=["POST"])
+def submit():
+    grams = float(request.form["grams"])
+    print(f"[Web Input] Grams: {grams}")
+    insert_to_supabase(grams)
+    # Redirect back to the main page after submission
+    return redirect(url_for("index"))
+
+if __name__ == "__main__":
+    app.run(port=5000)
