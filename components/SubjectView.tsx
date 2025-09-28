@@ -528,39 +528,71 @@ export default function SubjectView() {
     return dayRows;
   }, [events]);
 
+  const tenDayChart = useMemo(() => {
+    const ONE_DAY = 24 * 60 * 60 * 1000;
+
+    // map events -> [{ time: ms, count: number }]
+    const pts = events
+      .map(e => ({
+        time: Number(e.takenAtMs ?? buildTakenAt(e.date, e.time)),
+        count: Number(e.pillCount),
+      }))
+      .filter(p => Number.isFinite(p.time) && Number.isFinite(p.count))
+      .sort((a, b) => a.time - b.time);
+
+    // end of window = last reading (or "now" if you prefer)
+    const endRef = pts.length ? pts[pts.length - 1].time : Date.now();
+
+    // snap to calendar boundaries: [midnight 10 days ago, midnight after endRef]
+    const endDay = new Date(endRef); endDay.setHours(24, 0, 0, 0);
+    const startDay = new Date(endDay); startDay.setDate(startDay.getDate() - 9);
+    const domain: [number, number] = [startDay.getTime(), endDay.getTime()];
+
+    // keep only points that fall inside the 10-day window
+    const data = pts.filter(p => p.time >= domain[0] && p.time <= domain[1]);
+
+    // daily ticks
+    const ticks: number[] = [];
+    for (let t = domain[0]; t <= domain[1]; t += ONE_DAY) ticks.push(t);
+
+    return { data, domain, ticks };
+  }, [events]);
+
 
   return (
     <div className="min-h-screen bg-gray-900 p-6">
       {/* Header */}
       <div className="mb-8">
         
-        {/* Tabs */}
-        <div className="flex justify-between items-center mb-6">
+        {/* Header */}
+        <header className="relative h-20 mb-8">
+          {/* Left tabs, vertically centered in the same bar */}
+          <div className="absolute left-0 top-1/2 -translate-y-1/2">
             <div className="flex bg-gray-800 rounded-lg p-1">
-                <button 
-                  className={`px-4 py-2 rounded-md transition-colors ${
-                    currentView === 'aggregate' 
-                      ? 'bg-gray-600 text-white' 
-                      : 'text-gray-400 hover:text-white'
-                  }`}
-                  onClick={() => setCurrentView('aggregate')}
-                >
-                  Aggregate View
-                </button>
-                <button 
-                  className={`px-4 py-2 rounded-md transition-colors ${
-                    currentView === 'subject' 
-                      ? 'bg-gray-600 text-white' 
-                      : 'text-gray-400 hover:text-white'
-                  }`}
-                  onClick={() => setCurrentView('subject')}
-                >
-                  Subject View
-                </button>
+              <button
+                className={`px-4 py-2 rounded-md transition-colors ${
+                  currentView === 'aggregate' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:text-white'
+                }`}
+                onClick={() => setCurrentView('aggregate')}
+              >
+                Aggregate View
+              </button>
+              <button
+                className={`px-4 py-2 rounded-md transition-colors ${
+                  currentView === 'subject' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:text-white'
+                }`}
+                onClick={() => setCurrentView('subject')}
+              >
+                Subject View
+              </button>
             </div>
-            <h1 className="text-4xl font-bold text-white">Dose</h1>
-        </div>
-        
+          </div>
+
+          {/* Right-aligned logo, centered vertically in the bar */}
+          <h1 className="absolute right-0 top-[80%] -translate-y-1/2 pr-2 text-4xl font-bold text-white font-ttchocolate">
+            Dose
+          </h1>
+        </header>
 
         {/* Subject Selection - Only show in subject view */}
         {currentView === 'subject' && (
@@ -747,34 +779,38 @@ export default function SubjectView() {
               <CardTitle className="text-white text-lg font-semibold">Pill Count Over Time</CardTitle>
             </CardHeader>
             <CardContent>
-              <ResponsiveContainer width="100%" height={200}>
-                <LineChart data={pillCountSeries}>
+              <ResponsiveContainer width="100%" height={220}>
+                <LineChart data={tenDayChart.data}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                  <XAxis dataKey="time" stroke="#9CA3AF" fontSize={12} />
+                  <XAxis
+                    dataKey="time"
+                    type="number"
+                    domain={tenDayChart.domain}
+                    ticks={tenDayChart.ticks}
+                    tickFormatter={(ms) => new Date(ms as number).toLocaleDateString()}
+                    stroke="#9CA3AF"
+                    fontSize={12}
+                  />
                   <YAxis
                     stroke="#9CA3AF"
                     fontSize={12}
-                    domain={['dataMin - 2', 'dataMax + 2']}
-                    allowDecimals={false}
+                    domain={['dataMin - 1', 'dataMax + 1']}
                   />
                   <Tooltip
-                    contentStyle={{
-                      backgroundColor: '#374151',
-                      border: '1px solid #4B5563',
-                      borderRadius: '6px',
-                      color: '#F9FAFB',
-                    }}
+                    labelFormatter={(ms) => new Date(ms as number).toLocaleString()}
+                    contentStyle={{ backgroundColor: '#374151', border: '1px solid #4B5563', borderRadius: 6, color: '#F9FAFB' }}
                   />
                   <Line
                     type="monotone"
                     dataKey="count"
                     stroke="#3B82F6"
                     strokeWidth={2}
-                    dot={{ fill: '#3B82F6', strokeWidth: 2, r: 4 }}
-                    isAnimationActive={false}
+                    dot={{ r: 3 }}
+                    connectNulls
                   />
                 </LineChart>
               </ResponsiveContainer>
+
 
               {pillCountSeries.length === 0 && (
                 <div className="text-gray-400 text-sm mt-2">No pill count readings yet.</div>

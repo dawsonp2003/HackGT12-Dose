@@ -57,3 +57,11 @@
     @apply bg-background text-foreground;
   }
 }
+
+@font-face {
+  font-family: 'TT Chocolate';
+  src: url('/fonts/TTChocolate.woff2') format('woff2');
+  font-weight: 400 800;
+  font-style: normal;
+  font-display: swap;
+}

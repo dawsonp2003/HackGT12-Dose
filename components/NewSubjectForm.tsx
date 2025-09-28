@@ -247,7 +247,7 @@ export default function NewSubjectForm({ isOpen, onClose, onSubmit }: NewSubject
                     <option value="">Select race</option>
                     <option value="American Indian or Alaska Native">American Indian or Alaska Native</option>
                     <option value="Asian">Asian</option>
-                    <option value="Black or African American">Black or African American</option>
+                    <option value="Black">Black</option>
                     <option value="Pacific Islander">Pacific Islander</option>
                     <option value="White">White</option>
                   </select>
