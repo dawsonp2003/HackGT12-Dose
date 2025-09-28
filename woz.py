@@ -40,7 +40,7 @@ last_names = [
 ]
 
 # Race categories and approximate probabilities (based on 2020 US distributions; used for realism)
-race_choices = ["White", "Hispanic/Latino", "Black/African American", "Asian", "Other/Multiracial"]
+race_choices = ["White", "Hispanic", "Black", "Asian", "Other"]
 race_probs = [0.60, 0.19, 0.12, 0.06, 0.03]  # approx — see cited sources in the chat response
 
 # Dosing choices and probabilities
@@ -174,18 +174,107 @@ for sid in SUBJECT_IDS:
 subjects_df = pd.DataFrame(subjects_rows)
 events_df = pd.DataFrame(events_rows)
 
-# Update num_anomalies per subject (count non-empty anomaly_id)
-anomaly_counts = events_df[events_df["anomaly_id"] != ""].groupby("subject_id").size().to_dict()
-subjects_df["num_anomalies"] = subjects_df["subject_id"].map(lambda x: int(anomaly_counts.get(x, 0)))
+# --- Make grams a monotonic bottle reading (+pillCount/adherence/anomalyId) ---
 
-# Summary stats
+# Join subject info needed for simulation
+ev = events_df.merge(
+    subjects_df[["subject_id", "pill_count", "pills_per_dose", "grams_per_pill"]],
+    on="subject_id", how="left"
+)
+
+# Build a timestamp and sort
+ev["ts"] = pd.to_datetime(ev["event_date"] + " " + ev["event_time"])
+ev = ev.sort_values(["subject_id", "ts"]).reset_index(drop=True)
+
+# Map WOZ anomaly labels to numeric id + adherence + dose multiplier
+# 0 = on time/normal, 1 = extra, 2 = partial, 3 = missed
+def anomaly_props(label, pills_per_dose):
+    if label == "missed":   # no change
+        return 3, 0.0, 0.0
+    if label == "partial":  # ~half dose
+        return 2, 0.8, max(0.5, pills_per_dose * 0.5)
+    if label == "extra":    # one extra pill
+        return 1, 0.9, pills_per_dose + 1
+    return 0, 1.0, pills_per_dose  # normal
+
+pill_counts = []
+bottle_grams = []
+anom_ids = []
+adherences = []
+
+state = {}  # per-subject state: pills_left, capacity, prev_grams
+
+for i, row in ev.iterrows():
+    sid = row["subject_id"]
+    if sid not in state:
+        state[sid] = {
+            "pills_left": float(row["pill_count"]),
+            "capacity":   float(row["pill_count"]),
+            "prev_grams": float(row["pill_count"]) * float(row["grams_per_pill"]),
+        }
+
+    pills_left = state[sid]["pills_left"]
+    cap        = state[sid]["capacity"]
+    gpp        = float(row["grams_per_pill"])
+
+    an_id, adh, dose_pills = anomaly_props(row["anomaly_id"], float(row["pills_per_dose"]))
+
+    # Refill if not enough pills for the intended dose
+    if pills_left < dose_pills and an_id != 3:  # don't refill for a missed dose; allow bottle to sit
+        pills_left = cap
+
+    # Apply dose (missed => 0)
+    pills_left = max(0.0, pills_left - dose_pills)
+
+    # Bottle reading after the event
+    base_grams = pills_left * gpp
+    noisy = base_grams * float(np.random.normal(1.0, 0.003))  # tiny noise
+    # Enforce monotonic non-increasing unless we refilled this step
+    prev = state[sid]["prev_grams"]
+    refilled = base_grams > prev  # this only happens when we refilled above
+    grams_read = noisy if refilled else min(noisy, prev)
+
+    # Save state & outputs
+    state[sid]["pills_left"] = pills_left
+    state[sid]["prev_grams"] = grams_read
+
+    pill_counts.append(int(round(pills_left)))
+    bottle_grams.append(round(grams_read, 3))
+    anom_ids.append(an_id)
+    adherences.append(adh)
+
+# Write back to a schema your app expects
+ev["pillCount"] = pill_counts
+ev["grams"] = bottle_grams
+ev["anomalyId"] = anom_ids
+ev["adherenceScore"] = adherences
+
+# Finalize columns / names
+events_df_fixed = (
+    ev[["subject_id", "event_date", "event_time", "grams", "anomalyId", "adherenceScore", "pillCount"]]
+    .rename(columns={"subject_id":"subjectId", "event_date":"date", "event_time":"time"})
+)
+
+# From here on, use the fixed events
+events_df = events_df_fixed.copy()
+
+# Update num_anomalies per subject from fixed events (anomalyId != 0)
+anomaly_counts = (
+    events_df.loc[events_df["anomalyId"] != 0]
+             .groupby("subjectId").size()
+)
+subjects_df["num_anomalies"] = (
+    subjects_df["subject_id"].map(anomaly_counts).fillna(0).astype(int)
+)
+
+# Summary stats (use fixed events)
 total_events = len(events_df)
-per_subject_counts = events_df.groupby("subject_id").size()
+per_subject_counts = events_df.groupby("subjectId").size()
 min_ev, max_ev = int(per_subject_counts.min()), int(per_subject_counts.max())
 
 print(f"Created {len(subjects_df)} subjects and {total_events} events (per-subject events range: {min_ev}-{max_ev})")
 
-# Save CSVs
+# Save CSVs (do not overwrite with the old df)
 os.makedirs("/mnt/data", exist_ok=True)
 subjects_csv = "/mnt/data/subjects.csv"
 events_csv = "/mnt/data/events.csv"
@@ -193,10 +282,11 @@ events_csv = "/mnt/data/events.csv"
 subjects_df.to_csv(subjects_csv, index=False)
 events_df.to_csv(events_csv, index=False)
 
-# Display small samples to the user in the UI
+# Show samples from the FIXED events
 from caas_jupyter_tools import display_dataframe_to_user
 display_dataframe_to_user("subjects_sample", subjects_df.head(10))
 display_dataframe_to_user("events_sample", events_df.sample(10))
 
-# Also return a small JSON summary for the notebook output
-{"subjects_csv": subjects_csv, "events_csv": events_csv, "num_subjects": len(subjects_df), "total_events": total_events, "min_events_per_subject": min_ev, "max_events_per_subject": max_ev}
+{"subjects_csv": subjects_csv, "events_csv": events_csv,
+ "num_subjects": len(subjects_df), "total_events": total_events,
+ "min_events_per_subject": min_ev, "max_events_per_subject": max_ev}

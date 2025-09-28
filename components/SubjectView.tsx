@@ -32,8 +32,8 @@ const dateKeyFromMs = (ms: number) => dateKeyLocal(new Date(ms));
 
 // Filter options
 const timelinessOptions = ['All', 'On time', 'Anomaly']
-const doseSizeOptions = ['All', '1', '2']
 const dateRangeOptions = ['All', 'Last 7 days', 'Last 30 days', 'Last 90 days']
+const isDoseSizeAnomaly = (e: any) => Number(e.anomalyId) === 3;
 
 // Calendar Heatmap Component
 const CalendarHeatmap = ({
@@ -150,7 +150,6 @@ const pillFrac = (left?: number, total?: number) => {
 
 export default function SubjectView() {
   const [timelinessFilter, setTimelinessFilter] = useState('All')
-  const [doseSizeFilter, setDoseSizeFilter] = useState('All')
   const [dateRangeFilter, setDateRangeFilter] = useState('All')
   const [isNewSubjectFormOpen, setIsNewSubjectFormOpen] = useState(false)
 
@@ -226,7 +225,6 @@ export default function SubjectView() {
 
   const filteredEvents = events.filter(event => {
     if (timelinessFilter !== 'All' && event.timeliness !== timelinessFilter) return false;
-    if (doseSizeFilter !== 'All' && String(event.doseSize) !== doseSizeFilter) return false;
     return true;
   });
 
@@ -267,15 +265,15 @@ export default function SubjectView() {
         time: r.time,
         takenAtMs,
         timeliness: anomalyId !== 0 ? 'Anomaly' : 'On time',
-        doseSize: r.grams ?? r.doseSize ?? 1,
-        pillCount: r.pillCount,
-        grams: r.grams,
-        adherenceScore,     // numeric now
-        anomalyId,          // numeric now
+        // NOTE: we no longer derive doseSize here
+        pillCount: r.pillCount != null ? Number(r.pillCount) : undefined,
+        grams: r.grams != null ? Number(r.grams) : undefined,
+        adherenceScore,
+        anomalyId,
       };
     });
 
-    setEvents(normalized);
+    setEvents(recomputeDoseSizes(normalized));
     setEventsLoading(false);
   };
 
@@ -307,28 +305,27 @@ export default function SubjectView() {
 
     const channel = supabase
       .channel(`events:subject:${sidNum}`)
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'events', filter: `subjectId=eq.${sidNum}` },
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'events', filter: `subjectId=eq.${sidNum}` },
         ({ new: row }) => {
-          const normalized = normalize(row);
+          const normalized = normalize(row); // your normalize that does NOT set doseSize
           setEvents(prev => {
             const k = getKey(normalized);
             if (!k) return prev;
             const i = prev.findIndex(e => getKey(e) === k);
-            return i >= 0 ? prev.map((e, idx) => (idx === i ? normalized : e)) : [normalized, ...prev];
+            const next = i >= 0 ? prev.map((e, idx) => (idx === i ? normalized : e))
+                                : [normalized, ...prev];
+            return recomputeDoseSizes(next);
           });
         }
       )
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'events', filter: `subjectId=eq.${sidNum}` },
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'events', filter: `subjectId=eq.${sidNum}` },
         ({ new: row }) => {
           const normalized = normalize(row);
           setEvents(prev => {
             const k = getKey(normalized);
             if (!k) return prev;
-            return prev.map(e => (getKey(e) === k ? normalized : e));
+            const next = prev.map(e => (getKey(e) === k ? normalized : e));
+            return recomputeDoseSizes(next);
           });
         }
       )
@@ -558,6 +555,27 @@ export default function SubjectView() {
     return { data, domain, ticks };
   }, [events]);
 
+  const recomputeDoseSizes = (rows: any[]) => {
+    // chronological (oldest → newest)
+    const asc = [...rows].sort(
+      (a, b) => (a.takenAtMs ?? 0) - (b.takenAtMs ?? 0)
+    );
+
+    let prev: any | undefined;
+    for (const r of asc) {
+      let dose = 0;
+      if (prev && prev.pillCount != null && r.pillCount != null) {
+        const diff = Number(prev.pillCount) - Number(r.pillCount);
+        // negative diff means a refill; treat as 0 taken at this event
+        dose = diff >= 0 ? diff : 0;
+      }
+      r.doseSize = dose;
+      prev = r;
+    }
+
+    // return to newest-first for your table
+    return asc.sort((a, b) => (b.takenAtMs ?? 0) - (a.takenAtMs ?? 0));
+  };
 
   return (
     <div className="min-h-screen bg-gray-900 p-6">
@@ -629,7 +647,7 @@ export default function SubjectView() {
               <CardTitle className="text-white text-xl font-semibold">Patient Profile</CardTitle>
             </CardHeader>
             <CardContent className="space-y-6">
-                <div className="flex gap-10">
+                <div className="flex gap-16">
               {/* Patient Details */}
               <div className="space-y-3 w-1/3">
                 <div className="flex justify-between">
@@ -861,19 +879,8 @@ export default function SubjectView() {
                       </div>
                     </TableHead>
                     <TableHead className="text-gray-300">
-                      <div className="flex items-center space-x-2">
-                        <span>Dose Size</span>
-                        <select
-                          value={doseSizeFilter}
-                          onChange={(e) => setDoseSizeFilter(e.target.value)}
-                          className="bg-gray-600 text-white text-xs px-2 py-1 rounded border-gray-500"
-                        >
-                          {doseSizeOptions.map(option => (
-                            <option key={option} value={option}>{option}</option>
-                          ))}
-                        </select>
-                      </div>
-                    </TableHead>
+                      <span>Dose Size</span>
+                      </TableHead>
                     <TableHead className="text-gray-300">Pill Count</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -888,30 +895,35 @@ export default function SubjectView() {
                       <TableCell className="text-white">{fmtDate(event.takenAtMs)}</TableCell>
                       <TableCell className="text-white">{fmtTime(event.takenAtMs)}</TableCell>
                       <TableCell>
-                        <span
-                          className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                            event.timeliness === 'On time'
-                              ? 'bg-gray-600 text-gray-300'
-                              : 'bg-red-500 text-white'
-                          }`}
-                        >
-                          {event.timeliness === 'On time'
-                            ? <CheckCircle className="w-3 h-3 mr-1" />
-                            : <AlertTriangle className="w-3 h-3 mr-1" />}
-                          {event.timeliness}
-                        </span>
+                        <div className="flex justify-center">
+                          <span
+                            className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                              event.timeliness === 'On time'
+                                ? 'bg-gray-600 text-gray-300'
+                                : 'bg-red-500 text-white'
+                            }`}
+                          >
+                            {event.timeliness === 'On time'
+                              ? <CheckCircle className="w-3 h-3 mr-1" />
+                              : <AlertTriangle className="w-3 h-3 mr-1" />}
+                            {event.timeliness}
+                          </span>
+                        </div>
                       </TableCell>
                       <TableCell>
-                        <span
-                          className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                            Number(event.doseSize) === 2
-                              ? 'bg-gray-600 text-gray-300'
-                              : 'bg-red-500 text-white'
-                          }`}
-                        >
-                          <Pill className="w-3 h-3 mr-1" />
-                          {event.doseSize}
-                        </span>
+                        <div className="flex justify-center">
+                          <span
+                            className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                              isDoseSizeAnomaly(event)
+                                ? 'bg-red-500 text-white'     // only red when anomalyId === 3
+                                : 'bg-gray-600 text-gray-300' // otherwise gray
+                            }`}
+                            title={isDoseSizeAnomaly(event) ? 'Dose size mismatch (anomaly 3)' : 'Expected dose size'}
+                          >
+                            <Pill className="w-3 h-3 mr-1" />
+                            {event.doseSize}
+                          </span>
+                        </div>
                       </TableCell>
                       <TableCell className="text-white">
                         {pillFrac(

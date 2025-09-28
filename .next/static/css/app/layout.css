@@ -852,6 +852,9 @@ video {
 .gap-6 {
   gap: 1.5rem;
 }
+.gap-16 {
+  gap: 4rem;
+}
 .gap-y-2 {
   row-gap: 0.5rem;
 }
